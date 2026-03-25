@@ -60,67 +60,148 @@ def wait_for_page(driver: webdriver.Chrome, timeout: int = PAGE_LOAD_WAIT):
 
 
 def get_event_links(driver: webdriver.Chrome) -> list[dict]:
-    """Return list of {title, url} for each event on the season page."""
+    """Return list of {title, url, data_id} for each event on the season page."""
     driver.get(START_URL)
     wait_for_page(driver)
 
     events = []
-    # The FIA site uses different selectors depending on the year; try several.
-    selectors = [
-        "a.event-title",
-        "a.event-card",
-        ".event-title a",
-        ".season-document-event a",
-        "article a",
-        ".views-row a",
-    ]
+    seen_ids = set()
 
-    for selector in selectors:
-        elements = driver.find_elements(By.CSS_SELECTOR, selector)
-        if elements:
-            for el in elements:
-                href = el.get_attribute("href") or ""
-                title = el.text.strip() or el.get_attribute("title") or href
-                if href and "/documents/" in href:
-                    events.append({"title": title, "url": href})
-            if events:
-                break
+    # Event titles in this layout are rendered as <a class="event-title" ...> or <div class="event-title active">.
+    item_selectors = ["a.event-title", "div.event-title"]
+    for selector in item_selectors:
+        for el in driver.find_elements(By.CSS_SELECTOR, selector):
+            title = el.text.strip()
+            if not title:
+                continue
 
-    # Fallback: collect all internal links that look like event pages
+            href = el.get_attribute("href") or ""
+            data_id = el.get_attribute("data-id") or ""
+
+            # Some `div.event-title` (active event) does not have a data-id, but its sibling wrapper does.
+            if not data_id:
+                try:
+                    wrapper = el.find_element(By.XPATH, "following-sibling::ul[contains(@class, 'document-type-wrapper')]")
+                    m = re.search(r"data-id-(\d+)", wrapper.get_attribute("class") or "")
+                    if m:
+                        data_id = m.group(1)
+                except Exception:
+                    data_id = ""
+
+            # Fallback to href-based data-id
+            if not data_id and href:
+                m = re.search(r"/decision-document-list/nojs/(\d+)", href)
+                if m:
+                    data_id = m.group(1)
+
+            if not data_id:
+                # in case we cannot find an id, skip now to avoid duplicates and empties.
+                continue
+
+            if data_id in seen_ids:
+                continue
+
+            seen_ids.add(data_id)
+            events.append({
+                "title": title,
+                "url": urljoin(BASE_URL, href) if href else "",
+                "data_id": data_id,
+            })
+
+    # Fallback: collect any internal decision-document-list/nojs links if nothing found.
     if not events:
         for el in driver.find_elements(By.TAG_NAME, "a"):
             href = el.get_attribute("href") or ""
-            if (
-                href.startswith(BASE_URL)
-                and "/documents/" in href
-                and href != START_URL
-                and href not in {e["url"] for e in events}
-            ):
-                title = el.text.strip() or href
-                events.append({"title": title, "url": href})
+            title = el.text.strip() or href
+            m = re.search(r"/decision-document-list/nojs/(\d+)", href)
+            if m:
+                data_id = m.group(1)
+                if data_id in seen_ids:
+                    continue
+                seen_ids.add(data_id)
+                events.append({"title": title, "url": urljoin(BASE_URL, href), "data_id": data_id})
 
     print(f"Found {len(events)} event link(s).")
     return events
 
 
-def get_document_links(driver: webdriver.Chrome, event_url: str) -> list[dict]:
-    """Return list of {title, url} for each PDF on an event page."""
-    driver.get(event_url)
-    wait_for_page(driver)
-
+def get_document_links(driver: webdriver.Chrome, event: dict) -> list[dict]:
+    """Return list of {title, url} for each PDF in an event block."""
     docs = []
     seen = set()
 
-    for el in driver.find_elements(By.TAG_NAME, "a"):
-        href = el.get_attribute("href") or ""
-        if not href:
-            continue
-        # Normalise relative URLs
-        href = urljoin(BASE_URL, href)
-        if href.lower().endswith(".pdf") and href not in seen:
+    def parse_pdf_links_from_element(el):
+        found = []
+        # Anchor selectors may be flaky in older WebDriver CSS implementations, so use all links and filter by extension.
+        for a in el.find_elements(By.TAG_NAME, "a"):
+            href = a.get_attribute("href") or ""
+            if not href or not href.lower().endswith(".pdf"):
+                continue
+            href = urljoin(BASE_URL, href)
+            if href in seen:
+                continue
             seen.add(href)
-            title = el.text.strip() or el.get_attribute("title") or Path(urlparse(href).path).stem
-            docs.append({"title": title, "url": href})
+            title = a.text.strip() or a.get_attribute("title") or Path(urlparse(href).path).stem
+            found.append({"title": title, "url": href})
+        return found
+
+    # First, try to scrape from the season page block for the event
+    if event.get("data_id"):
+        if driver.current_url != START_URL:
+            driver.get(START_URL)
+            wait_for_page(driver)
+            time.sleep(1)
+
+        data_id = event["data_id"]
+        wrapper_selector = f"ul.document-type-wrapper.data-id-{data_id}"
+
+        try:
+            wrapper = driver.find_element(By.CSS_SELECTOR, wrapper_selector)
+
+            # If wrapper is not currently visible (collapsed), click the associated event title.
+            if wrapper.value_of_css_property("display") == "none":
+                try:
+                    event_el = wrapper.find_element(
+                        By.XPATH,
+                        "preceding-sibling::*[contains(concat(' ', normalize-space(@class), ' '), ' event-title ')][1]",
+                    )
+                    driver.execute_script("arguments[0].scrollIntoView(true); arguments[0].click();", event_el)
+                except Exception:
+                    # fallback search by exact title text
+                    if event.get("title"):
+                        try:
+                            title_xpath = f"//a[contains(@class,'event-title') and normalize-space(.)='{event['title']}'] | //div[contains(@class,'event-title') and normalize-space(.)='{event['title']}']"
+                            event_el = driver.find_element(By.XPATH, title_xpath)
+                            driver.execute_script("arguments[0].scrollIntoView(true); arguments[0].click();", event_el)
+                        except Exception:
+                            pass
+
+            # Wait for wrapper visibility and PDF count to stabilize.
+            try:
+                wrapper = WebDriverWait(driver, 15).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, wrapper_selector))
+                )
+                WebDriverWait(driver, 15).until(
+                    lambda d: len(d.find_elements(By.CSS_SELECTOR, f"{wrapper_selector} a")) > 0
+                )
+                wrapper = driver.find_element(By.CSS_SELECTOR, wrapper_selector)
+            except Exception:
+                pass
+
+            docs.extend(parse_pdf_links_from_element(wrapper))
+        except Exception:
+            pass
+
+
+    # If no PDFs found in season page DOM, fallback to direct event URL page parsing
+    if not docs and event.get("url"):
+        try:
+            driver.get(event["url"])
+            wait_for_page(driver)
+            time.sleep(1)
+            docs.extend(parse_pdf_links_from_element(driver))
+        except Exception:
+            pass
 
     return docs
 
@@ -169,8 +250,8 @@ def main():
         all_docs: list[dict] = []
 
         for event in events:
-            print(f"\nEvent: {event['title']}")
-            docs = get_document_links(driver, event["url"])
+            print(f"\nEvent: {event['title']} (id={event.get('data_id')})")
+            docs = get_document_links(driver, event)
             print(f"  Found {len(docs)} document(s).")
             for doc in docs:
                 doc["event"] = event["title"]
