@@ -257,6 +257,7 @@ def main():
         # Limit the number of events if specified
         events_to_process = events[:args.limit] if args.limit else events
 
+        downloaded = 0
         for event in events_to_process:
             print(f"\nEvent: {event['title']} (id={event.get('data_id')})")
             docs = get_document_links(driver, event)
@@ -271,6 +272,7 @@ def main():
             
             # Check how many documents already exist locally
             existing_count = 0
+            docs_to_download = []
             for doc in docs:
                 doc["event"] = event_title_with_year
                 event_dir = DOWNLOAD_DIR / sanitise_filename(doc["event"])
@@ -280,30 +282,20 @@ def main():
                 dest = event_dir / filename
                 if dest.exists():
                     existing_count += 1
+                else:
+                    docs_to_download.append((doc, dest))
             
             to_download = len(docs) - existing_count
             print(f"  {existing_count} already exist locally, {to_download} to download.")
             
-            all_docs.extend(docs)
-
-        print(f"\nTotal documents found: {len(all_docs)}")
-
-        downloaded = 0
-        for doc in all_docs:
-            event_dir = DOWNLOAD_DIR / sanitise_filename(doc["event"])
-            filename = sanitise_filename(doc["title"])
-            if not filename.lower().endswith(".pdf"):
-                filename += ".pdf"
-            dest = event_dir / filename
-
-            if dest.exists():
-                print(f"  SKIP (exists): {dest}")
-                continue
-
-            print(f"  Downloading: {doc['url']}")
-            if download_pdf(doc["url"], dest, session):
-                downloaded += 1
-                print(f"    Saved: {dest}")
+            # Download the documents for this event
+            for doc, dest in docs_to_download:
+                print(f"  Downloading: {doc['url']}")
+                if download_pdf(doc["url"], dest, session):
+                    downloaded += 1
+                    print(f"    Saved: {dest}")
+                else:
+                    print(f"    Failed: {doc['url']}")
 
         print(f"\nDone. Downloaded {downloaded} new file(s) to '{DOWNLOAD_DIR}/'.")
 
