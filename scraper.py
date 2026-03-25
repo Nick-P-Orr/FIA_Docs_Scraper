@@ -12,6 +12,7 @@ import os
 import re
 import time
 import requests
+import argparse
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -229,6 +230,10 @@ def download_pdf(url: str, dest: Path, session: requests.Session) -> bool:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Scrape FIA Formula One documents.")
+    parser.add_argument('--limit', type=int, default=None, help='Limit the number of events to process (default: process all)')
+    args = parser.parse_args()
+
     DOWNLOAD_DIR.mkdir(exist_ok=True)
 
     session = requests.Session()
@@ -249,12 +254,36 @@ def main():
 
         all_docs: list[dict] = []
 
-        for event in events:
+        # Limit the number of events if specified
+        events_to_process = events[:args.limit] if args.limit else events
+
+        for event in events_to_process:
             print(f"\nEvent: {event['title']} (id={event.get('data_id')})")
             docs = get_document_links(driver, event)
             print(f"  Found {len(docs)} document(s).")
+            if docs:
+                # Extract year from the first document's title
+                match = re.search(r"Published on \d{2}\.\d{2}\.(\d{2})", docs[0]["title"])
+                year = "20" + match.group(1) if match else "2026"  # fallback to current year
+                event_title_with_year = f"{event['title']} {year}"
+            else:
+                event_title_with_year = event["title"]
+            
+            # Check how many documents already exist locally
+            existing_count = 0
             for doc in docs:
-                doc["event"] = event["title"]
+                doc["event"] = event_title_with_year
+                event_dir = DOWNLOAD_DIR / sanitise_filename(doc["event"])
+                filename = sanitise_filename(doc["title"])
+                if not filename.lower().endswith(".pdf"):
+                    filename += ".pdf"
+                dest = event_dir / filename
+                if dest.exists():
+                    existing_count += 1
+            
+            to_download = len(docs) - existing_count
+            print(f"  {existing_count} already exist locally, {to_download} to download.")
+            
             all_docs.extend(docs)
 
         print(f"\nTotal documents found: {len(all_docs)}")
