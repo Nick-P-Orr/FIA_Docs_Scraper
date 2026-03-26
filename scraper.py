@@ -300,7 +300,29 @@ def main():
 
         all_docs: list[dict] = []
 
-        events_to_process = events[:args.limit] if args.limit else events
+        if args.limit:
+            events_to_process = events[:args.limit]
+        else:
+            latest = events[0]
+            rest = events[1:]
+
+            # Separate remaining events into missing (no local folder) and already present.
+            def has_local_folder(event: dict) -> bool:
+                return any(
+                    f.is_dir() and any(f.glob("*.pdf"))
+                    for f in DOWNLOAD_DIR.glob(f"{sanitise_filename(event['title'])}*")
+                )
+
+            missing = [e for e in rest if not has_local_folder(e)]
+
+            # Process latest first, then missing events oldest-first so that if the
+            # script is interrupted the most recently completed event always has a
+            # full document set.
+            events_to_process = [latest] + list(reversed(missing))
+
+            skipped = len(rest) - len(missing)
+            print(f"{skipped} event(s) already present locally — skipping.")
+            print(f"Processing latest event + {len(missing)} missing event(s) oldest-first.")
 
         downloaded = 0
         for i, event in enumerate(events_to_process, start=1):
