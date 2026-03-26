@@ -252,11 +252,11 @@ def download_pdf(url: str, dest: Path, session: requests.Session) -> bool:
         return False
 
 
-def validate_all_pdfs(download_dir: Path):
-    """Validate all PDFs in the download directory."""
+def validate_all_pdfs(download_dir: Path) -> list[Path]:
+    """Validate all PDFs in the download directory. Returns list of invalid files."""
     print("\nValidating all downloaded PDFs...")
     valid_count = 0
-    invalid_count = 0
+    invalid_files = []
     for pdf_file in download_dir.rglob("*.pdf"):
         try:
             from PyPDF2 import PdfReader
@@ -265,11 +265,12 @@ def validate_all_pdfs(download_dir: Path):
             valid_count += 1
         except ImportError:
             print("PyPDF2 not installed, skipping validation.")
-            return
+            return []
         except Exception as e:
             print(f"Invalid PDF: {pdf_file} - {e}")
-            invalid_count += 1
-    print(f"Validation complete: {valid_count} valid, {invalid_count} invalid PDFs.")
+            invalid_files.append(pdf_file)
+    print(f"Validation complete: {valid_count} valid, {len(invalid_files)} invalid PDFs.")
+    return invalid_files
 
 
 def main():
@@ -305,6 +306,7 @@ def main():
             remaining = len(events_to_process) - i
             print(f"\nEvent: {event['title']} (id={event.get('data_id')}) - {remaining} remaining")
             docs = get_document_links(driver, event)
+            all_docs.extend(docs)
             print(f"  Found {len(docs)} document(s).")
             if docs:
                 # Extract year from the first document's title
@@ -341,7 +343,19 @@ def main():
                 else:
                     print(f"    Failed: {doc['url']}")
 
-        validate_all_pdfs(DOWNLOAD_DIR)
+        invalid_files = validate_all_pdfs(DOWNLOAD_DIR)
+        if invalid_files:
+            print(f"\nRedownloading {len(invalid_files)} invalid file(s)...")
+            for invalid_file in invalid_files:
+                for doc in all_docs:
+                    event_dir_name = sanitise_filename(doc['event'])
+                    filename = sanitise_filename(doc['title'])
+                    if not filename.lower().endswith('.pdf'):
+                        filename += '.pdf'
+                    if invalid_file.parent.name == event_dir_name and invalid_file.name == filename:
+                        print(f"  Redownloading: {invalid_file}")
+                        download_pdf(doc['url'], invalid_file, session)
+                        break
         print(f"\nDone. Downloaded {downloaded} new file(s) to '{DOWNLOAD_DIR}/'.")
 
     finally:
