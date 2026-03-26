@@ -13,7 +13,8 @@ Requires:
 """
 
 import argparse
-import re
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import pdfplumber
@@ -89,10 +90,23 @@ def pdf_to_markdown(pdf_path: Path) -> str:
     return "\n".join(lines)
 
 
+def convert_one(args: tuple[Path, Path]) -> tuple[str, bool, str]:
+    """Worker function: convert a single PDF. Returns (filename, success, message)."""
+    pdf_path, out_path = args
+    try:
+        markdown = pdf_to_markdown(pdf_path)
+        out_path.write_text(markdown, encoding="utf-8")
+        return pdf_path.name, True, str(out_path)
+    except Exception as e:
+        return pdf_path.name, False, str(e)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Convert merged FIA PDFs to Markdown.")
     parser.add_argument("--input", "-i", type=Path, default=INPUT_DIR)
     parser.add_argument("--output", "-o", type=Path, default=OUTPUT_DIR)
+    parser.add_argument("--workers", "-w", type=int, default=os.cpu_count(),
+                        help=f"Parallel worker processes (default: {os.cpu_count()})")
     args = parser.parse_args()
 
     if not args.input.exists():
@@ -105,25 +119,31 @@ def main():
         return
 
     args.output.mkdir(parents=True, exist_ok=True)
-    print(f"Found {len(pdfs)} PDF(s). Converting to Markdown in '{args.output}/'.\n")
+
+    # Filter out already-converted files before submitting to the pool.
+    todo = [(p, args.output / (p.stem + ".md")) for p in pdfs if not (args.output / (p.stem + ".md")).exists()]
+    skipped = len(pdfs) - len(todo)
+
+    if skipped:
+        print(f"[SKIP] {skipped} already converted.")
+    if not todo:
+        print("Nothing to do.")
+        return
+
+    print(f"Converting {len(todo)} PDF(s) using {args.workers} worker(s)...\n")
 
     converted = 0
-    for pdf_path in pdfs:
-        out_path = args.output / (pdf_path.stem + ".md")
-        if out_path.exists():
-            print(f"[SKIP] {pdf_path.name}")
-            continue
+    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+        futures = {pool.submit(convert_one, item): item[0] for item in todo}
+        for future in as_completed(futures):
+            name, success, message = future.result()
+            if success:
+                print(f"  OK  {name} -> {message}")
+                converted += 1
+            else:
+                print(f"  ERR {name}: {message}")
 
-        print(f"Converting: {pdf_path.name}")
-        try:
-            markdown = pdf_to_markdown(pdf_path)
-            out_path.write_text(markdown, encoding="utf-8")
-            print(f"  -> {out_path}")
-            converted += 1
-        except Exception as e:
-            print(f"  ERROR: {e}")
-
-    print(f"\nDone. Converted {converted} file(s).")
+    print(f"\nDone. Converted {converted}/{len(todo)} file(s).")
 
 
 if __name__ == "__main__":
