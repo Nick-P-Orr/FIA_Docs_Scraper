@@ -223,10 +223,53 @@ def download_pdf(url: str, dest: Path, session: requests.Session) -> bool:
         with open(dest, "wb") as f:
             for chunk in resp.iter_content(chunk_size=8192):
                 f.write(chunk)
+        
+        # Validate file size
+        actual_size = dest.stat().st_size
+        if 'Content-Length' in resp.headers:
+            expected_size = int(resp.headers['Content-Length'])
+            if actual_size != expected_size:
+                print(f"    Size mismatch: expected {expected_size}, got {actual_size}")
+                dest.unlink()
+                return False
+        
+        # Validate PDF integrity (optional, requires PyPDF2)
+        try:
+            from PyPDF2 import PdfReader
+            with open(dest, 'rb') as f:
+                PdfReader(f)
+            print("    PDF validated")
+        except ImportError:
+            pass  # PyPDF2 not installed, skip validation
+        except Exception as e:
+            print(f"    PDF invalid: {e}")
+            dest.unlink()
+            return False
+        
         return True
     except Exception as exc:
         print(f"    ERROR downloading {url}: {exc}")
         return False
+
+
+def validate_all_pdfs(download_dir: Path):
+    """Validate all PDFs in the download directory."""
+    print("\nValidating all downloaded PDFs...")
+    valid_count = 0
+    invalid_count = 0
+    for pdf_file in download_dir.rglob("*.pdf"):
+        try:
+            from PyPDF2 import PdfReader
+            with open(pdf_file, 'rb') as f:
+                PdfReader(f)
+            valid_count += 1
+        except ImportError:
+            print("PyPDF2 not installed, skipping validation.")
+            return
+        except Exception as e:
+            print(f"Invalid PDF: {pdf_file} - {e}")
+            invalid_count += 1
+    print(f"Validation complete: {valid_count} valid, {invalid_count} invalid PDFs.")
 
 
 def main():
@@ -258,8 +301,9 @@ def main():
         events_to_process = events[:args.limit] if args.limit else events
 
         downloaded = 0
-        for event in events_to_process:
-            print(f"\nEvent: {event['title']} (id={event.get('data_id')})")
+        for i, event in enumerate(events_to_process, start=1):
+            remaining = len(events_to_process) - i
+            print(f"\nEvent: {event['title']} (id={event.get('data_id')}) - {remaining} remaining")
             docs = get_document_links(driver, event)
             print(f"  Found {len(docs)} document(s).")
             if docs:
@@ -297,6 +341,7 @@ def main():
                 else:
                     print(f"    Failed: {doc['url']}")
 
+        validate_all_pdfs(DOWNLOAD_DIR)
         print(f"\nDone. Downloaded {downloaded} new file(s) to '{DOWNLOAD_DIR}/'.")
 
     finally:
