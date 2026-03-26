@@ -1,6 +1,6 @@
 """
 FIA Document Scraper
-URL: https://www.fia.com/documents/championships/fia-formula-one-world-championship-14/season
+URL: https://www.fia.com/documents/championships/fia-formula-one-world-championship-14/season/championships/fia-formula-one-world-championship-14
 
 Requires:
     pip install selenium requests
@@ -30,7 +30,7 @@ except ImportError:
     USE_WDM = False
 
 BASE_URL = "https://www.fia.com"
-START_URL = "https://www.fia.com/documents/championships/fia-formula-one-world-championship-14/season"
+START_URL = "https://www.fia.com/documents/championships/fia-formula-one-world-championship-14/season/championships/fia-formula-one-world-championship-14"
 DOWNLOAD_DIR = Path("fia_documents")
 PAGE_LOAD_WAIT = 10  # seconds
 
