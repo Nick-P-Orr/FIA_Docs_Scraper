@@ -105,8 +105,9 @@ def main():
     parser = argparse.ArgumentParser(description="Convert merged FIA PDFs to Markdown.")
     parser.add_argument("--input", "-i", type=Path, default=INPUT_DIR)
     parser.add_argument("--output", "-o", type=Path, default=OUTPUT_DIR)
-    parser.add_argument("--workers", "-w", type=int, default=os.cpu_count(),
-                        help=f"Parallel worker processes (default: {os.cpu_count()})")
+    default_workers = max(1, int(os.cpu_count() * 0.25))
+    parser.add_argument("--workers", "-w", type=int, default=default_workers,
+                        help=f"Parallel worker processes (default: {default_workers})")
     args = parser.parse_args()
 
     if not args.input.exists():

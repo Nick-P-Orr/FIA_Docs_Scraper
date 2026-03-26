@@ -59,7 +59,7 @@ Already-merged files are skipped on subsequent runs.
 
 ### 3. Convert to Markdown — `pdf_to_markdown.py`
 
-Converts the merged PDFs to Markdown for LLM ingestion. Tables are rendered as Markdown table syntax. Runs in parallel using all available CPU cores. Output goes to `fia_docs_merged_md/`.
+Converts the merged PDFs to Markdown for LLM ingestion. Tables are rendered as Markdown table syntax. Runs in parallel using 25% of available CPU cores by default (to keep memory usage manageable). Output goes to `fia_docs_merged_md/`.
 
 ```
 python pdf_to_markdown.py
