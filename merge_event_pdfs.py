@@ -2,8 +2,8 @@
 Merges all PDFs within each event folder into a single unified PDF.
 
 Usage:
-    python merge_event_pdfs.py                    # output alongside each event folder
-    python merge_event_pdfs.py --output merged/   # output to a separate directory
+    python merge_event_pdfs.py                        # output to fia_documents_merged/
+    python merge_event_pdfs.py --output my_folder/   # output to a custom directory
 """
 
 import argparse
@@ -12,6 +12,7 @@ from pathlib import Path
 from pypdf import PdfReader, PdfWriter
 
 DOWNLOAD_DIR = Path("fia_documents")
+MERGED_DIR = Path("fia_documents_merged")
 
 
 def merge_event(event_dir: Path, output_path: Path) -> int:
@@ -47,8 +48,8 @@ def main():
     parser.add_argument(
         "--output", "-o",
         type=Path,
-        default=None,
-        help="Directory to write merged PDFs (default: alongside each event folder as <Event>.pdf)",
+        default=MERGED_DIR,
+        help=f"Directory to write merged PDFs (default: {MERGED_DIR}/)",
     )
     args = parser.parse_args()
 
@@ -61,13 +62,11 @@ def main():
         print(f"No event folders found in '{DOWNLOAD_DIR}/'.")
         return
 
-    print(f"Found {len(event_dirs)} event folder(s).\n")
+    args.output.mkdir(parents=True, exist_ok=True)
+    print(f"Found {len(event_dirs)} event folder(s). Outputting to '{args.output}/'.\n")
 
     for event_dir in event_dirs:
-        if args.output:
-            output_path = args.output / f"{event_dir.name}.pdf"
-        else:
-            output_path = DOWNLOAD_DIR / f"{event_dir.name}.pdf"
+        output_path = args.output / f"{event_dir.name}.pdf"
 
         if output_path.exists():
             print(f"[SKIP] {event_dir.name} — merged PDF already exists.")
