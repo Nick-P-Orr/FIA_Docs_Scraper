@@ -298,8 +298,25 @@ def main():
 
         all_docs: list[dict] = []
 
-        # Limit the number of events if specified
-        events_to_process = events[:args.limit] if args.limit else events
+        # Work out which events need processing.
+        existing_folders = {d.name for d in DOWNLOAD_DIR.iterdir() if d.is_dir()} if DOWNLOAD_DIR.exists() else set()
+        missing_events = [e for e in events if sanitise_filename(e["title"]) not in existing_folders
+                          and not any(f.startswith(sanitise_filename(e["title"])) for f in existing_folders)]
+        gap = len(events) - len(existing_folders)
+
+        if args.limit:
+            events_to_process = events[:args.limit]
+            print(f"--limit set: processing {len(events_to_process)} event(s).")
+        elif gap <= 1:
+            # Only the latest event (first in list) is likely new.
+            events_to_process = events[:1]
+            print(f"{len(existing_folders)} local folder(s), {len(events)} remote event(s) — "
+                  f"gap is {gap}, checking latest event only.")
+        else:
+            # Multiple events missing — check every event not already present locally.
+            events_to_process = missing_events if missing_events else events
+            print(f"{len(existing_folders)} local folder(s), {len(events)} remote event(s) — "
+                  f"gap is {gap}, running full check ({len(events_to_process)} event(s) to process).")
 
         downloaded = 0
         for i, event in enumerate(events_to_process, start=1):
