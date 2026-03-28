@@ -10,6 +10,7 @@ Requires:
 
 import os
 import re
+import shutil
 import time
 import requests
 import argparse
@@ -49,6 +50,17 @@ def make_driver() -> webdriver.Chrome:
     if USE_WDM:
         service = Service(ChromeDriverManager().install())
         return webdriver.Chrome(service=service, options=options)
+
+    # On ARM Linux (e.g. Raspberry Pi), Selenium's built-in manager is unsupported.
+    # Explicitly find the system chromedriver and chromium binaries installed via apt.
+    chromedriver = shutil.which("chromedriver")
+    chromium = shutil.which("chromium") or shutil.which("chromium-browser")
+    if chromedriver:
+        service = Service(executable_path=chromedriver)
+        if chromium:
+            options.binary_location = chromium
+        return webdriver.Chrome(service=service, options=options)
+
     return webdriver.Chrome(options=options)
 
 
