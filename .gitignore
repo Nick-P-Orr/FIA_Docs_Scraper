@@ -1,3 +1,6 @@
 fia_documents/
 fia_documents_merged/
 fia_docs_merged_md/
+
+.DS_Store
+**/.DS_Store
