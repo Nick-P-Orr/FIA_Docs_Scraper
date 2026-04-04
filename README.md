@@ -25,6 +25,7 @@ pip install -r requirements.txt
 | `requests` | HTTP downloads of PDF files |
 | `pypdf` | PDF merging |
 | `pdfplumber` | PDF text/table extraction for Markdown conversion |
+| `beautifulsoup4` | HTML parsing for Wikipedia calendar scraping |
 | `discord.py` | Discord bot |
 
 Chrome must be installed. Optionally install `webdriver-manager` to manage ChromeDriver automatically:
@@ -67,7 +68,28 @@ python pdf_to_markdown.py
 python pdf_to_markdown.py --input fia_documents_merged/ --output fia_docs_merged_md/ --workers 4
 ```
 
-### 4. Discord bot — `discord_bot.py`
+### 4. F1 calendar — `f1_calendar.py` / `f1_calendar_v2.py`
+
+Gates the FIA docs scraper so it only runs after a new race weekend has occurred. Two versions are available with identical interfaces but different data sources:
+
+| Script | Source |
+|---|---|
+| `f1_calendar.py` | [Ergast community API](https://api.jolpi.ca/ergast/f1) |
+| `f1_calendar_v2.py` | [Wikipedia season article](https://en.wikipedia.org/wiki/2026_Formula_One_World_Championship) (scraped with BeautifulSoup) |
+
+```bash
+python f1_calendar_v2.py                   # show completed races this year
+python f1_calendar_v2.py --update          # refresh calendar from Wikipedia
+python f1_calendar_v2.py --year 2025       # show a specific year
+python f1_calendar_v2.py --check           # exit 0 if scraper should run, 1 if not
+python f1_calendar_v2.py --mark-scraped    # record that scraper ran today
+```
+
+The `--check` flag compares the most recently completed race date against the last-scraped date — exits 0 if a new race has occurred since the last scrape, 1 otherwise.
+
+Each version maintains its own cache and state files (`f1_calendar.json` / `f1_state.json` for v1, `f1_calendar_v2.json` / `f1_state_v2.json` for v2).
+
+### 5. Discord bot — `discord_bot.py`
 
 Minimal Discord bot skeleton. Requires a `DISCORD_BOT_TOKEN` environment variable.
 
@@ -82,6 +104,22 @@ Use **cron** to run the scraper automatically. Open the crontab editor:
 ```bash
 crontab -e
 ```
+
+### Calendar-aware scheduling (recommended)
+
+Use `f1_calendar_v2.py --check` to gate the scraper so it only runs when a new race weekend has occurred. First, keep the calendar up to date with a weekly refresh:
+
+```
+0 0 * * 1 cd /home/pi/FIA_Docs_Scraper && venv/bin/python f1_calendar_v2.py --update >> scraper.log 2>&1
+```
+
+Then run the scraper periodically; it will skip runs when no new race has happened:
+
+```
+0 */6 * * * cd /home/pi/FIA_Docs_Scraper && venv/bin/python f1_calendar_v2.py --check && venv/bin/python scraper.py && venv/bin/python f1_calendar_v2.py --mark-scraped >> scraper.log 2>&1
+```
+
+### Simple scheduling (no calendar gate)
 
 Example — run every 6 hours on race weekends (Fri, Sat, Sun):
 
@@ -122,4 +160,9 @@ fia_docs_merged_md/             ← Markdown versions for LLM ingestion
   JAPANESE GRAND PRIX 2026.md
   CHINESE GRAND PRIX 2026.md
   ...
+
+f1_calendar.json                ← cached race schedules — Ergast API (v1)
+f1_state.json                   ← scraper state for v1 (last run date)
+f1_calendar_v2.json             ← cached race schedules — Wikipedia (v2)
+f1_state_v2.json                ← scraper state for v2 (last run date)
 ```
