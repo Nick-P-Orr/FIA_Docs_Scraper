@@ -7,6 +7,8 @@ Usage:
 """
 
 import argparse
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from pypdf import PdfReader, PdfWriter
@@ -65,17 +67,32 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     print(f"Found {len(event_dirs)} event folder(s). Outputting to '{args.output}/'.\n")
 
+    todo = []
     for event_dir in event_dirs:
         output_path = args.output / f"{event_dir.name}.pdf"
-
         if output_path.exists():
             print(f"[SKIP] {event_dir.name} — merged PDF already exists.")
-            continue
+        else:
+            todo.append((event_dir, output_path))
 
-        print(f"Merging: {event_dir.name}")
-        pages = merge_event(event_dir, output_path)
-        if pages:
-            print(f"  -> {output_path} ({pages} pages)")
+    if not todo:
+        print("\nDone.")
+        return
+
+    workers = min(len(todo), max(1, os.cpu_count() or 1))
+    print(f"\nMerging {len(todo)} event(s) using {workers} worker(s)...")
+
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(merge_event, event_dir, output_path): (event_dir, output_path)
+                   for event_dir, output_path in todo}
+        for future in as_completed(futures):
+            event_dir, output_path = futures[future]
+            try:
+                pages = future.result()
+                if pages:
+                    print(f"  -> {output_path} ({pages} pages)")
+            except Exception as e:
+                print(f"  ERROR merging {event_dir.name}: {e}")
 
     print("\nDone.")
 

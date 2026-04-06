@@ -36,6 +36,9 @@ _MONTHS = {
     "september": "09", "october": "10", "november": "11", "december": "12",
 }
 
+_RE_DATE_DMY = re.compile(r"(\d{1,2})(?:–\d{1,2})?\s+([A-Za-z]+)")
+_RE_DATE_MDY = re.compile(r"([A-Za-z]+)\s+(\d{1,2})")
+
 
 # ---------------------------------------------------------------------------
 # Persistence helpers
@@ -67,7 +70,7 @@ def _parse_date(raw: str, year: int) -> Optional[str]:
     text = re.sub(r"\[.*?\]", "", raw).strip()
 
     # Try "DD Month" or "DD–DD Month"
-    m = re.search(r"(\d{1,2})(?:–\d{1,2})?\s+([A-Za-z]+)", text)
+    m = _RE_DATE_DMY.search(text)
     if m:
         day = m.group(1).zfill(2)
         month = _MONTHS.get(m.group(2).lower())
@@ -75,7 +78,7 @@ def _parse_date(raw: str, year: int) -> Optional[str]:
             return f"{year}-{month}-{day}"
 
     # Try "Month DD"
-    m = re.search(r"([A-Za-z]+)\s+(\d{1,2})", text)
+    m = _RE_DATE_MDY.search(text)
     if m:
         month = _MONTHS.get(m.group(1).lower())
         day = m.group(2).zfill(2)

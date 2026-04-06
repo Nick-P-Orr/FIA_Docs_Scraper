@@ -59,20 +59,19 @@ def pdf_to_markdown(pdf_path: Path) -> str:
         for page_num, page in enumerate(pdf.pages, start=1):
             lines.append(f"\n---\n<!-- Page {page_num} -->\n")
 
-            tables = page.extract_tables()
-            if tables:
-                # Build a set of bounding boxes for table regions so we can
-                # avoid duplicating that text in the plain-text pass.
-                table_bboxes = [table_obj.bbox for table_obj in page.find_tables()]
+            table_objects = page.find_tables()
+            if table_objects:
+                # Extract table data and bounding boxes in a single pass.
+                table_bboxes = [t.bbox for t in table_objects]
+                tables = [t.extract() for t in table_objects]
 
-                # Extract text outside table regions
-                non_table_page = page
-                for bbox in table_bboxes:
-                    non_table_page = non_table_page.filter(
-                        lambda obj, bb=bbox: not (
-                            bb[0] <= obj["x0"] <= bb[2] and bb[1] <= obj["top"] <= bb[3]
-                        )
+                # Extract text outside all table regions using a single composite filter.
+                non_table_page = page.filter(
+                    lambda obj: not any(
+                        bb[0] <= obj["x0"] <= bb[2] and bb[1] <= obj["top"] <= bb[3]
+                        for bb in table_bboxes
                     )
+                )
 
                 text = non_table_page.extract_text() or ""
                 if text.strip():

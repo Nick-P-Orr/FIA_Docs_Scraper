@@ -11,9 +11,9 @@ Requires:
 import os
 import re
 import shutil
-import time
 import requests
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -65,11 +65,13 @@ def make_driver() -> webdriver.Chrome:
 
 
 def wait_for_page(driver: webdriver.Chrome, timeout: int = PAGE_LOAD_WAIT):
-    """Wait until the page body is present."""
+    """Wait until the page body is present and the document is interactive."""
     WebDriverWait(driver, timeout).until(
         EC.presence_of_element_located((By.TAG_NAME, "body"))
     )
-    time.sleep(2)  # allow JS to settle
+    WebDriverWait(driver, timeout).until(
+        lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
+    )
 
 
 def get_event_links(driver: webdriver.Chrome) -> list[dict]:
@@ -165,7 +167,6 @@ def get_document_links(driver: webdriver.Chrome, event: dict) -> list[dict]:
         if driver.current_url != START_URL:
             driver.get(START_URL)
             wait_for_page(driver)
-            time.sleep(1)
 
         data_id = event["data_id"]
         wrapper_selector = f"ul.document-type-wrapper.data-id-{data_id}"
@@ -207,13 +208,11 @@ def get_document_links(driver: webdriver.Chrome, event: dict) -> list[dict]:
         except Exception:
             pass
 
-
     # If no PDFs found in season page DOM, fallback to direct event URL page parsing
     if not docs and event.get("url"):
         try:
             driver.get(event["url"])
             wait_for_page(driver)
-            time.sleep(1)
             docs.extend(parse_pdf_links_from_element(driver))
         except Exception:
             pass
@@ -237,7 +236,7 @@ def download_pdf(url: str, dest: Path, session: requests.Session) -> bool:
         with open(dest, "wb") as f:
             for chunk in resp.iter_content(chunk_size=8192):
                 f.write(chunk)
-        
+
         # Validate file size
         actual_size = dest.stat().st_size
         if 'Content-Length' in resp.headers:
@@ -246,7 +245,7 @@ def download_pdf(url: str, dest: Path, session: requests.Session) -> bool:
                 print(f"    Size mismatch: expected {expected_size}, got {actual_size}")
                 dest.unlink()
                 return False
-        
+
         # Validate PDF integrity (optional, requires PyPDF2)
         try:
             from PyPDF2 import PdfReader
@@ -259,32 +258,11 @@ def download_pdf(url: str, dest: Path, session: requests.Session) -> bool:
             print(f"    PDF invalid: {e}")
             dest.unlink()
             return False
-        
+
         return True
     except Exception as exc:
         print(f"    ERROR downloading {url}: {exc}")
         return False
-
-
-def validate_all_pdfs(download_dir: Path) -> list[Path]:
-    """Validate all PDFs in the download directory. Returns list of invalid files."""
-    print("\nValidating all downloaded PDFs...")
-    valid_count = 0
-    invalid_files = []
-    for pdf_file in download_dir.rglob("*.pdf"):
-        try:
-            from PyPDF2 import PdfReader
-            with open(pdf_file, 'rb') as f:
-                PdfReader(f)
-            valid_count += 1
-        except ImportError:
-            print("PyPDF2 not installed, skipping validation.")
-            return []
-        except Exception as e:
-            print(f"Invalid PDF: {pdf_file} - {e}")
-            invalid_files.append(pdf_file)
-    print(f"Validation complete: {valid_count} valid, {len(invalid_files)} invalid PDFs.")
-    return invalid_files
 
 
 def main():
@@ -309,8 +287,6 @@ def main():
         if not events:
             print("No events found — check selectors or try without headless mode.")
             return
-
-        all_docs: list[dict] = []
 
         if args.limit:
             events_to_process = events[:args.limit]
@@ -337,11 +313,12 @@ def main():
             print(f"Processing latest event + {len(missing)} missing event(s) oldest-first.")
 
         downloaded = 0
+        failed_downloads: list[tuple[dict, Path]] = []
+
         for i, event in enumerate(events_to_process, start=1):
             remaining = len(events_to_process) - i
             print(f"\nEvent: {event['title']} (id={event.get('data_id')}) - {remaining} remaining")
             docs = get_document_links(driver, event)
-            all_docs.extend(docs)
             print(f"  Found {len(docs)} document(s).")
             if docs:
                 # Extract year from the first document's title
@@ -350,7 +327,7 @@ def main():
                 event_title_with_year = f"{event['title']} {year}"
             else:
                 event_title_with_year = event["title"]
-            
+
             # Check how many documents already exist locally
             existing_count = 0
             docs_to_download = []
@@ -365,32 +342,35 @@ def main():
                     existing_count += 1
                 else:
                     docs_to_download.append((doc, dest))
-            
+
             to_download = len(docs) - existing_count
             print(f"  {existing_count} already exist locally, {to_download} to download.")
-            
-            # Download the documents for this event
-            for doc, dest in docs_to_download:
-                print(f"  Downloading: {doc['url']}")
+
+            # Download documents for this event in parallel
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                future_to_item = {
+                    executor.submit(download_pdf, doc["url"], dest, session): (doc, dest)
+                    for doc, dest in docs_to_download
+                }
+                for future in as_completed(future_to_item):
+                    doc, dest = future_to_item[future]
+                    if future.result():
+                        downloaded += 1
+                        print(f"  Saved: {dest}")
+                    else:
+                        print(f"  Failed: {doc['url']}")
+                        failed_downloads.append((doc, dest))
+
+        if failed_downloads:
+            print(f"\nRetrying {len(failed_downloads)} failed download(s)...")
+            for doc, dest in failed_downloads:
+                print(f"  Retrying: {doc['url']}")
                 if download_pdf(doc["url"], dest, session):
                     downloaded += 1
                     print(f"    Saved: {dest}")
                 else:
-                    print(f"    Failed: {doc['url']}")
+                    print(f"    Failed again: {doc['url']}")
 
-        invalid_files = validate_all_pdfs(DOWNLOAD_DIR)
-        if invalid_files:
-            print(f"\nRedownloading {len(invalid_files)} invalid file(s)...")
-            for invalid_file in invalid_files:
-                for doc in all_docs:
-                    event_dir_name = sanitise_filename(doc['event'])
-                    filename = sanitise_filename(doc['title'])
-                    if not filename.lower().endswith('.pdf'):
-                        filename += '.pdf'
-                    if invalid_file.parent.name == event_dir_name and invalid_file.name == filename:
-                        print(f"  Redownloading: {invalid_file}")
-                        download_pdf(doc['url'], invalid_file, session)
-                        break
         print(f"\nDone. Downloaded {downloaded} new file(s) to '{DOWNLOAD_DIR}/'.")
 
     finally:
