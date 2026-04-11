@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ event_name }} — FIA Docs{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center mb-4">
+  <a href="/" class="btn btn-sm btn-outline-secondary me-3">← Back</a>
+  <h5 class="mb-0 me-3">{{ event_name }}</h5>
+  {% if has_pdf %}
+  <a href="/pdf/{{ event_name }}" target="_blank" class="btn btn-sm btn-outline-light">View PDF</a>
+  {% endif %}
+</div>
+
+<div class="card bg-dark border-secondary" style="max-width: 960px;">
+  <div class="card-body px-4 py-4">
+    {{ content | safe }}
+  </div>
+</div>
+{% endblock %}

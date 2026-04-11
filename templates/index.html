@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}FIA Docs — Events{% endblock %}
+{% block content %}
+<h5 class="mb-3 text-muted">Stewards Documents</h5>
+
+{% if events %}
+<div class="accordion" id="eventsAccordion" style="max-width: 720px;">
+  {% for event in events %}
+  <div class="accordion-item bg-dark border-secondary">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed bg-dark text-white"
+              type="button"
+              data-bs-toggle="collapse"
+              data-bs-target="#event-{{ loop.index }}"
+              aria-expanded="false">
+        <span class="me-auto">{{ event.name }}</span>
+        <span class="ms-3 me-2">
+          {% if event.has_markdown %}
+          <span class="badge bg-primary">MD</span>
+          {% endif %}
+          {% if event.has_merged_pdf %}
+          <span class="badge bg-secondary">Merged PDF</span>
+          {% endif %}
+          {% if event.raw_pdfs %}
+          <span class="badge bg-dark border border-secondary">{{ event.raw_pdfs | length }} docs</span>
+          {% endif %}
+        </span>
+      </button>
+    </h2>
+    <div id="event-{{ loop.index }}" class="accordion-collapse collapse">
+      <div class="accordion-body pt-2 pb-3">
+
+        {% if event.has_markdown or event.has_merged_pdf %}
+        <div class="mb-2">
+          {% if event.has_markdown %}
+          <a href="/docs/{{ event.name }}" class="btn btn-sm btn-outline-primary me-2">View Markdown</a>
+          {% endif %}
+          {% if event.has_merged_pdf %}
+          <a href="/pdf/{{ event.name }}" target="_blank" class="btn btn-sm btn-outline-secondary">Merged PDF</a>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        {% if event.raw_pdfs %}
+        <ul class="list-group list-group-flush">
+          {% for doc in event.raw_pdfs %}
+          <li class="list-group-item list-group-item-dark border-secondary py-1 px-2 d-flex justify-content-between align-items-center">
+            <span class="small text-truncate me-3" style="max-width: 520px;">{{ doc[:-4] }}</span>
+            <a href="/pdf/{{ event.name }}/{{ doc }}" target="_blank"
+               class="btn btn-sm btn-outline-secondary flex-shrink-0">PDF</a>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted small mb-0">No individual documents found.</p>
+        {% endif %}
+
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="text-muted mt-4">
+  <p>No documents found.</p>
+  <p>Go to <a href="/admin">Admin</a> and run <strong>Scrape FIA Website</strong> to get started.</p>
+</div>
+{% endif %}
+{% endblock %}
